@@ -22,8 +22,11 @@ package analyze
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/yourname/blast-radius/internal/store"
 )
@@ -249,6 +252,50 @@ func ImpactOfFile(ctx context.Context, s *store.Store, path string, opt Options)
 	sortByDepthThenName(report.Impacted)
 	report.TotalNodes = len(report.Impacted)
 	return report, nil
+}
+
+// CachedImpact is a caching wrapper around Impact.
+//
+// On a cache hit the BFS is skipped entirely — the result is decoded from
+// blast_impact_cache. On a miss the BFS runs, the result is stored, and the
+// Report is returned normally. Cache keys include all options that affect the
+// result so stale entries are never returned for different option sets.
+//
+// The cache is invalidated wholesale by Store.Open when archaeologist
+// re-indexes (meta.last_index changes). No per-entry TTL is needed.
+func CachedImpact(ctx context.Context, s *store.Store, rootID int64, opt Options) (*Report, error) {
+	if opt.MaxDepth == 0 {
+		opt = DefaultOptions()
+	}
+	key := cacheKey(rootID, opt)
+
+	if payload, ok, _ := s.LoadImpactCache(key); ok {
+		var cached []ImpactedSymbol
+		if err := json.Unmarshal([]byte(payload), &cached); err == nil {
+			// Reconstruct a minimal Report from the cached impacted set.
+			// Root symbol is re-fetched so callers get a complete struct.
+			root, _ := s.GetSymbolByID(rootID)
+			rep := &Report{TotalNodes: len(cached), Impacted: cached}
+			if root != nil {
+				rep.Root = *root
+			}
+			return rep, nil
+		}
+	}
+
+	rep, err := Impact(ctx, s, rootID, opt)
+	if err != nil {
+		return nil, err
+	}
+	if b, jerr := json.Marshal(rep.Impacted); jerr == nil {
+		_ = s.CacheImpact(key, rootID, string(b), time.Now().Unix())
+	}
+	return rep, nil
+}
+
+func cacheKey(rootID int64, opt Options) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%v:%v", rootID, opt.MaxDepth, opt.IncludeTests, opt.ExpandInterfaces)))
+	return fmt.Sprintf("%x", h)
 }
 
 func sortByDepthThenName(s []ImpactedSymbol) {

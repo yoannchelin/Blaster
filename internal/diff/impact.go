@@ -77,7 +77,7 @@ func AnalyzeFiles(
 					HunkStart: 1,
 					HunkEnd:   sym.LineEnd,
 				})
-				rep, err := analyze.Impact(ctx, s, sym.ID, opt)
+				rep, err := analyze.CachedImpact(ctx, s, sym.ID, opt)
 				if err != nil {
 					return nil, fmt.Errorf("impact rename-old %s: %w", sym.Qualified, err)
 				}
@@ -116,7 +116,7 @@ func AnalyzeFiles(
 						HunkEnd:   h.End(),
 					})
 					// Run impact for this symbol.
-					rep, err := analyze.Impact(ctx, s, sym.ID, opt)
+					rep, err := analyze.CachedImpact(ctx, s, sym.ID, opt)
 					if err != nil {
 						return nil, fmt.Errorf("impact %s: %w", sym.Qualified, err)
 					}

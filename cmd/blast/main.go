@@ -169,7 +169,7 @@ func runImpact(args []string) {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	rep, err := analyze.Impact(ctx, s, sym.ID, opt)
+	rep, err := analyze.CachedImpact(ctx, s, sym.ID, opt)
 	if err != nil {
 		die("impact: %v", err)
 	}

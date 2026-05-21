@@ -99,7 +99,7 @@ func (s *Server) handleImpactOf(
 	}
 	opt.IncludeTests = in.IncludeTests
 
-	rep, err := analyze.Impact(ctx, s.Store, sym.ID, opt)
+	rep, err := analyze.CachedImpact(ctx, s.Store, sym.ID, opt)
 	if err != nil {
 		return nil, nil, err
 	}
