@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -52,6 +53,11 @@ func main() {
 
 	log.SetOutput(os.Stderr)
 	log.Printf("blast-mcp: serving repo %s", root)
+
+	// Invalidate blast caches automatically whenever archaeologist re-indexes.
+	go s.Watch(ctx, 5*time.Second, func(newIdx string) {
+		log.Printf("blast-mcp: index updated (%s) — caches invalidated", newIdx)
+	})
 
 	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil {
 		fmt.Fprintf(os.Stderr, "blast-mcp: %v\n", err)

@@ -13,11 +13,13 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -476,6 +478,36 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// Watch polls meta.last_index every interval and calls onChange whenever
+// archaeologist re-indexes. It also wipes blast caches on each change so
+// subsequent queries reflect the new index. Blocks until ctx is cancelled.
+//
+// Typical use: start as a goroutine in the MCP server so caches stay fresh
+// without restarting the server process.
+func (s *Store) Watch(ctx context.Context, interval time.Duration, onChange func(newIndex string)) {
+	var last string
+	// Seed last so we don't fire on startup.
+	last, _ = s.LastIndexedAt()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cur, err := s.LastIndexedAt()
+			if err != nil || cur == "" || cur == last {
+				continue
+			}
+			_ = s.invalidateIfStale()
+			last = cur
+			if onChange != nil {
+				onChange(cur)
+			}
+		}
+	}
 }
 
 // invalidateIfStale wipes our caches if the archaeologist re-indexed since

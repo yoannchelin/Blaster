@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/yourname/blast-radius/internal/analyze"
 	"github.com/yourname/blast-radius/internal/diff"
@@ -52,6 +53,8 @@ func main() {
 		runFile(args)
 	case "diff":
 		runDiff(args)
+	case "watch":
+		runWatch(args)
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -71,6 +74,7 @@ Subcommands:
   impact     Impact of changing a named symbol
   file       Impact of changing any symbol in a file
   diff       Impact of a unified diff (path or stdin)
+  watch      Watch for re-indexes and recompute metrics automatically
 
 Run "blast <subcommand> -h" for flags.
 
@@ -289,6 +293,51 @@ func runDiff(args []string) {
 	}
 	fmt.Println()
 	fmt.Println(report.FormatVerdict(v))
+}
+
+func runWatch(args []string) {
+	fs := flag.NewFlagSet("watch", flag.ExitOnError)
+	repo := fs.String("repo", ".", "path to the repo root")
+	interval := fs.Duration("interval", 5*time.Second, "polling interval")
+	withTests := fs.Bool("with-tests", false, "also rebuild test map on each re-index")
+	_ = fs.Parse(args)
+
+	s := mustOpen(*repo)
+	defer s.Close()
+
+	fmt.Fprintf(os.Stderr, "blast watch: polling %s every %s\n", s.Path(), *interval)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	s.Watch(ctx, *interval, func(newIdx string) {
+		fmt.Fprintf(os.Stderr, "\n[watch] re-index detected (%s) — recomputing metrics…\n", newIdx)
+		err := risk.Compute(ctx, s, risk.DefaultWeights(), func(done, total int) {
+			fmt.Fprintf(os.Stderr, "\r[metrics] %d/%d ", done, total)
+		})
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[watch] metrics error: %v\n", err)
+			return
+		}
+		if up, _ := s.LastIndexedAt(); up != "" {
+			_ = s.SetBlastMeta("seen_index", up)
+		}
+		fmt.Fprintf(os.Stderr, "[watch] metrics done.\n")
+
+		if *withTests {
+			fmt.Fprintf(os.Stderr, "[watch] rebuilding test map…\n")
+			n, err := tests.BuildMap(ctx, s, tests.Options{MaxDepth: 6}, func(done, total int) {
+				fmt.Fprintf(os.Stderr, "\r[tests] %d/%d ", done, total)
+			})
+			fmt.Fprintln(os.Stderr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[watch] tests error: %v\n", err)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "[watch] %d test mappings written.\n", n)
+		}
+	})
+	fmt.Fprintln(os.Stderr, "blast watch: stopped.")
 }
 
 // --- helpers -----------------------------------------------------------------
