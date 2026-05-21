@@ -11,12 +11,17 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strings"
 )
 
 // OfFunction parses the Go source file at filePath and returns the cyclomatic
 // complexity of the function body that contains lineStart. Returns 1 (the
-// minimum) when the file cannot be parsed or no matching function is found.
+// minimum) for non-Go files, unparseable files, or when no matching function
+// is found.
 func OfFunction(filePath string, lineStart int) int {
+	if !strings.HasSuffix(filePath, ".go") {
+		return 1
+	}
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, filePath, nil, 0)
 	if err != nil {

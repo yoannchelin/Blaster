@@ -417,7 +417,11 @@ func (s *Store) AllSymbolsForMetrics() ([]Symbol, error) {
 	return out, rows.Err()
 }
 
-// AllTestFunctions returns test functions (kind='func', file is_test=1, name starts with Test/Benchmark/Fuzz).
+// AllTestFunctions returns test entry points from all indexed languages.
+//
+// Go: kind='func' in is_test=1 file, name starts with Test/Benchmark/Fuzz.
+// Other languages (TS, etc.): any kind='func' in an is_test=1 file — we rely
+// on Archaeologist's is_test flag rather than name conventions we can't know.
 func (s *Store) AllTestFunctions() ([]Symbol, error) {
 	rows, err := s.db.Query(`
 		SELECT s.id, s.kind, s.name, s.qualified, COALESCE(s.file_id, 0),
@@ -426,7 +430,10 @@ func (s *Store) AllTestFunctions() ([]Symbol, error) {
 		JOIN files f ON f.id = s.file_id
 		WHERE s.kind = 'func'
 		  AND f.is_test = 1
-		  AND (s.name LIKE 'Test%' OR s.name LIKE 'Benchmark%' OR s.name LIKE 'Fuzz%')`)
+		  AND (
+		    (f.path LIKE '%.go' AND (s.name LIKE 'Test%' OR s.name LIKE 'Benchmark%' OR s.name LIKE 'Fuzz%'))
+		    OR f.path NOT LIKE '%.go'
+		  )`)
 	if err != nil {
 		return nil, err
 	}
