@@ -134,7 +134,7 @@ Tous les tools retournent un **Verdict** structuré avec : severity (`low|medium
 
 5. ~~**PageRank centrality dans le risk score**~~ ✅ Fait. Colonne `pagerank` lue depuis `symbols` (Archaeologist la calcule déjà). 6ème facteur, poids 0.10 pris sur `TransitiveIn` (0.35→0.25). Sur Hugo : `hugolib.Test` (pagerank=1.0) remonte correctement en tête.
 
-6. **Cyclomatic complexity locale** — pour les fonctions touchées par un diff, parser le fichier au moment de l'analyse et compter les branches. Indicateur supplémentaire de "ce changement est risqué".
+6. ~~**Cyclomatic complexity locale**~~ ✅ Fait. `internal/complexity.OfFunction()` parse le source Go via `go/ast` et compte if/for/range/case/select/&&/||. `TouchedSymbol.Complexity` populé dans `AnalyzeFiles`. CLI affiche un ⚠ pour complexity ≥ 10. `Store.Root()` ajouté pour dériver la racine du repo depuis le path de la DB.
 
 7. ~~**Watch mode**~~ ✅ Fait. `Store.Watch()` poll `meta.last_index` sur un ticker, invalide les caches blast au re-index. CLI : `blast watch [--interval] [--with-tests]`. MCP : goroutine en background dans `blast-mcp` (caches toujours frais sans intervention).
 
