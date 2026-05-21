@@ -36,16 +36,22 @@ type Weights struct {
 	Interface    float64
 	Churn        float64
 	LOC          float64
+	Pagerank     float64 // graph centrality from archaeologist; 0 if not computed
 }
 
 // DefaultWeights returns the tuned defaults.
+// The six weights must sum to 1.0. Pagerank takes 0.10 reallocated from
+// TransitiveIn (0.35→0.25) and LOC (0.15→0.15, unchanged) to keep the
+// formula balanced: transitive call count and graph centrality capture
+// related but distinct signals.
 func DefaultWeights() Weights {
 	return Weights{
-		TransitiveIn: 0.35,
+		TransitiveIn: 0.25,
 		Exported:     0.15,
 		Interface:    0.15,
 		Churn:        0.20,
 		LOC:          0.15,
+		Pagerank:     0.10,
 	}
 }
 
@@ -106,13 +112,16 @@ func Compute(ctx context.Context, s *store.Store, w Weights, progress func(done,
 		if maxLOC > 0 && sym.FileID != 0 {
 			nLOC = float64(locByFile[sym.FileID]) / float64(maxLOC)
 		}
+		// Pagerank is already normalised to [0,1] by archaeologist (max node = 1.0).
+		nPagerank := sym.Pagerank
 
 		score := 100 * (
 			w.TransitiveIn*nTrans +
 				w.Exported*nExported +
 				w.Interface*nIface +
 				w.Churn*nChurn +
-				w.LOC*nLOC)
+				w.LOC*nLOC +
+				w.Pagerank*nPagerank)
 
 		if err := s.PutMetric(store.Metrics{
 			SymbolID:     sym.ID,

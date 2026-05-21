@@ -21,9 +21,11 @@ type DiffImpactReport struct {
 
 // FileImpact is one file's slice of the report.
 type FileImpact struct {
-	Path           string                  `json:"path"`
-	IsNew          bool                    `json:"is_new"`
-	TouchedSymbols []TouchedSymbol         `json:"touched_symbols"`
+	Path           string                   `json:"path"`
+	OldPath        string                   `json:"old_path,omitempty"`
+	IsNew          bool                     `json:"is_new"`
+	IsRename       bool                     `json:"is_rename,omitempty"`
+	TouchedSymbols []TouchedSymbol          `json:"touched_symbols"`
 	Impacted       []analyze.ImpactedSymbol `json:"impacted"`
 }
 
@@ -59,16 +61,40 @@ func AnalyzeFiles(
 	merged := map[int64]analyze.ImpactedSymbol{}
 
 	for _, f := range touched {
-		fi := FileImpact{Path: f.Path, IsNew: f.IsNew}
+		fi := FileImpact{Path: f.Path, IsNew: f.IsNew, IsRename: f.IsRename, OldPath: f.OldPath}
+
+		// For renames, look up callers of the old path's symbols first.
+		// The old symbols still exist in the index under their old qualified
+		// names, and their callers are exactly who breaks if the rename
+		// changed the package path or exported name.
+		if f.IsRename && f.OldPath != "" {
+			oldSyms, _ := s.SymbolsInFile(f.OldPath)
+			for _, sym := range oldSyms {
+				fi.TouchedSymbols = append(fi.TouchedSymbols, TouchedSymbol{
+					Qualified: sym.Qualified,
+					Kind:      sym.Kind,
+					Line:      sym.LineStart,
+					HunkStart: 1,
+					HunkEnd:   sym.LineEnd,
+				})
+				rep, err := analyze.Impact(ctx, s, sym.ID, opt)
+				if err != nil {
+					return nil, fmt.Errorf("impact rename-old %s: %w", sym.Qualified, err)
+				}
+				for _, imp := range rep.Impacted {
+					if existing, ok := merged[imp.SymbolID]; !ok || imp.Depth < existing.Depth {
+						merged[imp.SymbolID] = imp
+					}
+				}
+				fi.Impacted = append(fi.Impacted, rep.Impacted...)
+			}
+		}
 
 		file, err := s.LookupFileByPath(f.Path)
 		if err != nil {
 			return nil, fmt.Errorf("lookup file %s: %w", f.Path, err)
 		}
 		if file == nil {
-			// File not in index — could be a new file (in which case the diff
-			// flagged it), or a non-Go file. We still include it in the report
-			// but with empty impact.
 			report.Files = append(report.Files, fi)
 			continue
 		}

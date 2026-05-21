@@ -40,6 +40,7 @@ type Symbol struct {
 	Signature string
 	Doc       string
 	Exported  bool
+	Pagerank  float64
 }
 
 // File mirrors the archaeologist `files` row.
@@ -107,7 +108,7 @@ func (s *Store) Path() string { return s.path }
 func (s *Store) LookupSymbol(qualified string) (*Symbol, error) {
 	row := s.db.QueryRow(`
 		SELECT id, kind, name, qualified, COALESCE(file_id, 0),
-		       line_start, line_end, signature, doc, exported
+		       line_start, line_end, signature, doc, exported, pagerank
 		FROM symbols WHERE qualified = ?`, qualified)
 	return scanSymbol(row)
 }
@@ -116,7 +117,7 @@ func (s *Store) LookupSymbol(qualified string) (*Symbol, error) {
 func (s *Store) GetSymbolByID(id int64) (*Symbol, error) {
 	row := s.db.QueryRow(`
 		SELECT id, kind, name, qualified, COALESCE(file_id, 0),
-		       line_start, line_end, signature, doc, exported
+		       line_start, line_end, signature, doc, exported, pagerank
 		FROM symbols WHERE id = ?`, id)
 	return scanSymbol(row)
 }
@@ -144,7 +145,7 @@ func (s *Store) GetFileByID(id int64) (*File, error) {
 func (s *Store) SymbolsInFile(path string) ([]Symbol, error) {
 	rows, err := s.db.Query(`
 		SELECT s.id, s.kind, s.name, s.qualified, COALESCE(s.file_id, 0),
-		       s.line_start, s.line_end, s.signature, s.doc, s.exported
+		       s.line_start, s.line_end, s.signature, s.doc, s.exported, s.pagerank
 		FROM symbols s
 		JOIN files f ON f.id = s.file_id
 		WHERE f.path = ?
@@ -391,7 +392,7 @@ func (s *Store) LoadImpactCache(key string) (string, bool, error) {
 func (s *Store) AllSymbolsForMetrics() ([]Symbol, error) {
 	rows, err := s.db.Query(`
 		SELECT s.id, s.kind, s.name, s.qualified, COALESCE(s.file_id, 0),
-		       s.line_start, s.line_end, s.signature, s.doc, s.exported
+		       s.line_start, s.line_end, s.signature, s.doc, s.exported, s.pagerank
 		FROM symbols s
 		LEFT JOIN files f ON f.id = s.file_id
 		WHERE s.kind IN ('func','method','type','interface')
@@ -415,7 +416,7 @@ func (s *Store) AllSymbolsForMetrics() ([]Symbol, error) {
 func (s *Store) AllTestFunctions() ([]Symbol, error) {
 	rows, err := s.db.Query(`
 		SELECT s.id, s.kind, s.name, s.qualified, COALESCE(s.file_id, 0),
-		       s.line_start, s.line_end, s.signature, s.doc, s.exported
+		       s.line_start, s.line_end, s.signature, s.doc, s.exported, s.pagerank
 		FROM symbols s
 		JOIN files f ON f.id = s.file_id
 		WHERE s.kind = 'func'
@@ -460,7 +461,7 @@ func scanSymbol(r rowScanner) (*Symbol, error) {
 	var s Symbol
 	var exported int
 	if err := r.Scan(&s.ID, &s.Kind, &s.Name, &s.Qualified, &s.FileID,
-		&s.LineStart, &s.LineEnd, &s.Signature, &s.Doc, &exported); err != nil {
+		&s.LineStart, &s.LineEnd, &s.Signature, &s.Doc, &exported, &s.Pagerank); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}

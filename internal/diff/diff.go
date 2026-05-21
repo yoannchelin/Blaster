@@ -26,10 +26,12 @@ import (
 
 // TouchedFile is one entry in the parsed diff.
 type TouchedFile struct {
-	Path  string        // path on the "+" (new) side, relative to repo root
-	Hunks []HunkRange   // line ranges affected on the new side
-	IsNew bool          // true if the file was created in this diff
-	IsDel bool          // true if the file was deleted
+	Path    string      // path on the "+" (new) side, relative to repo root
+	OldPath string      // non-empty only for renames; the pre-rename path
+	Hunks   []HunkRange // line ranges affected on the new side
+	IsNew   bool        // true if the file was created in this diff
+	IsDel   bool        // true if the file was deleted
+	IsRename bool       // true if the file was renamed (OldPath is set)
 }
 
 // HunkRange is one new-side line range from a `@@` header.
@@ -75,12 +77,26 @@ func Parse(r io.Reader) ([]TouchedFile, error) {
 			if cur != nil {
 				cur.IsDel = true
 			}
+		case strings.HasPrefix(line, "rename from "):
+			// "rename from old/path.go" — git's explicit rename marker.
+			if cur != nil {
+				cur.OldPath = strings.TrimPrefix(line, "rename from ")
+				cur.IsRename = true
+			}
+		case strings.HasPrefix(line, "rename to "):
+			// "rename to new/path.go" — sets the canonical new path.
+			if cur != nil {
+				cur.Path = strings.TrimPrefix(line, "rename to ")
+			}
 		case strings.HasPrefix(line, "+++ "):
 			// "+++ b/path/to/file.go" or "+++ /dev/null"
+			// For renames, "rename to" already set the path; don't overwrite.
 			if cur == nil {
 				cur = &TouchedFile{}
 			}
-			cur.Path = stripBPrefix(strings.TrimPrefix(line, "+++ "))
+			if cur.Path == "" {
+				cur.Path = stripBPrefix(strings.TrimPrefix(line, "+++ "))
+			}
 		case strings.HasPrefix(line, "@@"):
 			if cur == nil {
 				continue

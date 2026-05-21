@@ -22,7 +22,7 @@ import (
 const seedSchema = `
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, package TEXT NOT NULL, loc INTEGER, is_test INTEGER DEFAULT 0, is_generated INTEGER DEFAULT 0);
-CREATE TABLE symbols (id INTEGER PRIMARY KEY, kind TEXT, name TEXT, qualified TEXT UNIQUE, file_id INTEGER, line_start INTEGER, line_end INTEGER, signature TEXT DEFAULT '', doc TEXT DEFAULT '', exported INTEGER DEFAULT 0);
+CREATE TABLE symbols (id INTEGER PRIMARY KEY, kind TEXT, name TEXT, qualified TEXT UNIQUE, file_id INTEGER, line_start INTEGER, line_end INTEGER, signature TEXT DEFAULT '', doc TEXT DEFAULT '', exported INTEGER DEFAULT 0, pagerank REAL NOT NULL DEFAULT 0);
 CREATE TABLE edges (src INTEGER, dst INTEGER, relation TEXT, weight REAL DEFAULT 1.0, PRIMARY KEY(src,dst,relation));
 CREATE TABLE commits (hash TEXT PRIMARY KEY, author TEXT, email TEXT, ts INTEGER, subject TEXT);
 CREATE TABLE file_commits (file_id INTEGER, commit_hash TEXT, added INTEGER, deleted INTEGER, PRIMARY KEY(file_id, commit_hash));

@@ -38,7 +38,8 @@ CREATE TABLE symbols (
     line_end INTEGER NOT NULL DEFAULT 0,
     signature TEXT NOT NULL DEFAULT '',
     doc TEXT NOT NULL DEFAULT '',
-    exported INTEGER NOT NULL DEFAULT 0
+    exported INTEGER NOT NULL DEFAULT 0,
+    pagerank REAL NOT NULL DEFAULT 0
 );
 CREATE TABLE edges (
     src INTEGER NOT NULL,
