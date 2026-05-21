@@ -130,9 +130,9 @@ Tous les tools retournent un **Verdict** structuré avec : severity (`low|medium
 
 3. **Tests d'intégration sur Terraform / Kubernetes** — Hugo est validé. Kubernetes (~10k tests) permettrait de mesurer `blast tests` à l'échelle annoncée dans les pièges (potentiellement ~1 min).
 
-4. **Gestion des renames dans le diff parser** — actuellement un rename git apparaît comme `delete a/old.go + create b/new.go`, et le `delete` est filtré, donc on perd la trace. Détecter les pairs `--- a/old.go` / `+++ b/new.go` quand les paths diffèrent.
+4. ~~**Gestion des renames dans le diff parser**~~ ✅ Fait. `rename from`/`rename to` détectés ; `AnalyzeFiles` run l'impact sur les symboles de l'ancien path, `FileImpact` expose `OldPath`+`IsRename`.
 
-5. **PageRank centrality dans le risk score** — Archaeologist a déjà `store/pagerank.go`. On peut lire la colonne et l'ajouter au score (pondération à tuner).
+5. ~~**PageRank centrality dans le risk score**~~ ✅ Fait. Colonne `pagerank` lue depuis `symbols` (Archaeologist la calcule déjà). 6ème facteur, poids 0.10 pris sur `TransitiveIn` (0.35→0.25). Sur Hugo : `hugolib.Test` (pagerank=1.0) remonte correctement en tête.
 
 6. **Cyclomatic complexity locale** — pour les fonctions touchées par un diff, parser le fichier au moment de l'analyse et compter les branches. Indicateur supplémentaire de "ce changement est risqué".
 
@@ -163,6 +163,9 @@ Tous les tools retournent un **Verdict** structuré avec : severity (`low|medium
 - **`risk.fetchFileChurn` ne déclenche pas une transaction** — la lecture est simple, mais ça veut dire que si Archaeologist re-indexe en parallèle, on lit un snapshot incohérent. En pratique on ne fait jamais les deux en même temps. Si ça devient un problème : ajouter `BEGIN`/`COMMIT` autour du `fetch`.
 - **Compteurs FanIn/FanOut peuvent mentir si edges sont dédupliqués** — la table `edges` a une PK (src, dst, relation), donc deux appels de A→B comptent comme 1. C'est volontaire mais l'utilisateur peut être surpris.
 - **Les fichiers à la racine doivent tous être dans le même package** — Go interdit plusieurs packages dans le même répertoire. La structure `internal/` est obligatoire, pas optionnelle.
+- **`pagerank` est déjà dans `symbols`, pas besoin de le calculer** — Archaeologist écrit la colonne à chaque `archaeo index`. Blast la lit directement. Si elle vaut 0 partout, c'est que la version d'Archaeologist est ancienne (avant le commit pagerank).
+- **Fixtures de test : toujours ajouter `pagerank REAL NOT NULL DEFAULT 0`** dans le DDL des `symbols` des tests. Sinon `scanSymbol` plante avec "no such column: pagerank". Voir `internal/store/store_test.go` et `internal/analyze/analyze_test.go`.
+- **Rename git : deux formats possibles** — le format `rename from/to` (similarity ≥ 50%) est géré. Le format "delete + create" (similarity < 50%) produit deux entrées séparées dans le diff et est traité comme une suppression + nouveau fichier — comportement correct mais on perd la traçabilité sémantique du rename.
 
 ---
 
@@ -234,7 +237,7 @@ git diff main | /path/to/bin/blast diff --recommend-tests
 
 1. Lis ce fichier **en entier**.
 2. Vérifie que `git-archaeologist` est installé et fonctionnel à côté — Blast en dépend.
-3. Demande à l'utilisateur : *"On reprend où ? Section 6 indique qu'il reste : gérer les renames dans le diff parser, ajouter PageRank au risk score, tester sur Kubernetes, brancher Claude Desktop. Tu veux attaquer lequel ?"*
+3. Demande à l'utilisateur : *"On reprend où ? Section 6 indique qu'il reste : watch mode, TypeScript, mode explain, cache des impact reports, tester sur Kubernetes. Tu veux attaquer lequel ?"*
 4. Si l'utilisateur dit *"continue"* sans préciser, propose le premier item non fait de la section 6.
 5. Avant d'écrire du code, `view` les fichiers concernés.
 6. Travaille. Mets à jour ce CLAUDE.md à la fin si tu as appris quelque chose.
