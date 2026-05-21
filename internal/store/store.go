@@ -104,6 +104,9 @@ func (s *Store) DB() *sql.DB { return s.db }
 // Path is the on-disk path of the index file.
 func (s *Store) Path() string { return s.path }
 
+// Root is the repo root (parent of .archaeo/).
+func (s *Store) Root() string { return filepath.Dir(filepath.Dir(s.path)) }
+
 // --- Read helpers (archaeologist tables) -------------------------------------
 
 // LookupSymbol finds a symbol by qualified name. Returns (nil, nil) if not found.

@@ -288,7 +288,11 @@ func runDiff(args []string) {
 		}
 		fmt.Printf("  %s%s — %d symbol(s) touched\n", f.Path, marker, len(f.TouchedSymbols))
 		for _, t := range f.TouchedSymbols {
-			fmt.Printf("    • %s  [%s, hunk %d-%d]\n", t.Qualified, t.Kind, t.HunkStart, t.HunkEnd)
+			if t.Complexity >= 10 {
+				fmt.Printf("    • %s  [%s, hunk %d-%d, complexity=%d ⚠]\n", t.Qualified, t.Kind, t.HunkStart, t.HunkEnd, t.Complexity)
+			} else {
+				fmt.Printf("    • %s  [%s, hunk %d-%d]\n", t.Qualified, t.Kind, t.HunkStart, t.HunkEnd)
+			}
 		}
 	}
 	fmt.Println()

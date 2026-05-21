@@ -3,9 +3,11 @@ package diff
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 
 	"github.com/yourname/blast-radius/internal/analyze"
+	"github.com/yourname/blast-radius/internal/complexity"
 	"github.com/yourname/blast-radius/internal/store"
 )
 
@@ -31,11 +33,12 @@ type FileImpact struct {
 
 // TouchedSymbol is a symbol whose line range overlaps a diff hunk.
 type TouchedSymbol struct {
-	Qualified string `json:"qualified"`
-	Kind      string `json:"kind"`
-	Line      int    `json:"line"`
-	HunkStart int    `json:"hunk_start"`
-	HunkEnd   int    `json:"hunk_end"`
+	Qualified  string `json:"qualified"`
+	Kind       string `json:"kind"`
+	Line       int    `json:"line"`
+	HunkStart  int    `json:"hunk_start"`
+	HunkEnd    int    `json:"hunk_end"`
+	Complexity int    `json:"complexity,omitempty"`
 }
 
 // AnalyzeFiles maps each TouchedFile to symbols and computes their impact.
@@ -105,15 +108,17 @@ func AnalyzeFiles(
 		}
 
 		// Intersect symbols with hunks.
+		absPath := filepath.Join(s.Root(), f.Path)
 		for _, sym := range syms {
 			for _, h := range f.Hunks {
 				if overlaps(sym.LineStart, sym.LineEnd, h.Start, h.End()) {
 					fi.TouchedSymbols = append(fi.TouchedSymbols, TouchedSymbol{
-						Qualified: sym.Qualified,
-						Kind:      sym.Kind,
-						Line:      sym.LineStart,
-						HunkStart: h.Start,
-						HunkEnd:   h.End(),
+						Qualified:  sym.Qualified,
+						Kind:       sym.Kind,
+						Line:       sym.LineStart,
+						HunkStart:  h.Start,
+						HunkEnd:    h.End(),
+						Complexity: complexity.OfFunction(absPath, sym.LineStart),
 					})
 					// Run impact for this symbol.
 					rep, err := analyze.CachedImpact(ctx, s, sym.ID, opt)
