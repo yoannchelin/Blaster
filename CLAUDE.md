@@ -138,7 +138,7 @@ Tous les tools retournent un **Verdict** structuré avec : severity (`low|medium
 
 7. ~~**Watch mode**~~ ✅ Fait. `Store.Watch()` poll `meta.last_index` sur un ticker, invalide les caches blast au re-index. CLI : `blast watch [--interval] [--with-tests]`. MCP : goroutine en background dans `blast-mcp` (caches toujours frais sans intervention).
 
-8. **TypeScript** — dépend du call graph TS d'Archaeologist (déjà implémenté). Pas de blocage technique, juste vérifier que les requêtes SQL marchent sur des qualified names format TS (`relPath.Function`).
+8. ~~**TypeScript**~~ ✅ Fait. Les requêtes SQL (LookupSymbol, SymbolsInFile, BFS) sont language-agnostic. `AllTestFunctions` étendu : Go garde le filtre `Test%/Benchmark%/Fuzz%`, les autres langages (TS, etc.) incluent toutes les funcs des fichiers `is_test=1`. `complexity.OfFunction` skippe explicitement les fichiers non-`.go`. Reste à tester sur un repo TS indexé par Archaeologist.
 
 9. ~~**Mode "explain"**~~ ✅ Fait. `ImpactedHighlight.Explain` = rôle (test entry point, HTTP handler, constructor…) + profondeur + métriques (transitive_in, interface, exported). Affiché en `→` dans le CLI, `omitempty` en JSON.
 
