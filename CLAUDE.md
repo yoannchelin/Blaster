@@ -136,7 +136,7 @@ Tous les tools retournent un **Verdict** structuré avec : severity (`low|medium
 
 6. **Cyclomatic complexity locale** — pour les fonctions touchées par un diff, parser le fichier au moment de l'analyse et compter les branches. Indicateur supplémentaire de "ce changement est risqué".
 
-7. **Watch mode** — invalider les caches dès que `index.db` mtime change (utile en dev quand Archaeologist tourne en watch).
+7. ~~**Watch mode**~~ ✅ Fait. `Store.Watch()` poll `meta.last_index` sur un ticker, invalide les caches blast au re-index. CLI : `blast watch [--interval] [--with-tests]`. MCP : goroutine en background dans `blast-mcp` (caches toujours frais sans intervention).
 
 8. **TypeScript** — dépend du call graph TS d'Archaeologist (déjà implémenté). Pas de blocage technique, juste vérifier que les requêtes SQL marchent sur des qualified names format TS (`relPath.Function`).
 
