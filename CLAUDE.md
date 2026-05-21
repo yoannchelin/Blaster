@@ -140,9 +140,9 @@ Tous les tools retournent un **Verdict** structuré avec : severity (`low|medium
 
 8. **TypeScript** — dépend du call graph TS d'Archaeologist (déjà implémenté). Pas de blocage technique, juste vérifier que les requêtes SQL marchent sur des qualified names format TS (`relPath.Function`).
 
-9. **Mode "explain"** — pour chaque symbole du top-risks, générer une phrase humaine du genre *"impacté car appelé par 3 routes HTTP via 2 hops"*. Ça redonne du contexte à l'humain qui lit le verdict.
+9. ~~**Mode "explain"**~~ ✅ Fait. `ImpactedHighlight.Explain` = rôle (test entry point, HTTP handler, constructor…) + profondeur + métriques (transitive_in, interface, exported). Affiché en `→` dans le CLI, `omitempty` en JSON.
 
-10. **Cache des impact reports** — `blast_impact_cache` est créée mais jamais lue/écrite. Brancher `Synthesize` ou un wrapper dessus avec un cache key = `sha256(rootIDs + options)`.
+10. ~~**Cache des impact reports**~~ ✅ Fait. `CachedImpact()` wraps `Impact()` avec `blast_impact_cache` (clé sha256 rootID+options). Hugo : 466ms → 6ms sur hit. Invalidation via `Store.Open` au re-index.
 
 ---
 
@@ -165,6 +165,7 @@ Tous les tools retournent un **Verdict** structuré avec : severity (`low|medium
 - **Les fichiers à la racine doivent tous être dans le même package** — Go interdit plusieurs packages dans le même répertoire. La structure `internal/` est obligatoire, pas optionnelle.
 - **`pagerank` est déjà dans `symbols`, pas besoin de le calculer** — Archaeologist écrit la colonne à chaque `archaeo index`. Blast la lit directement. Si elle vaut 0 partout, c'est que la version d'Archaeologist est ancienne (avant le commit pagerank).
 - **Fixtures de test : toujours ajouter `pagerank REAL NOT NULL DEFAULT 0`** dans le DDL des `symbols` des tests. Sinon `scanSymbol` plante avec "no such column: pagerank". Voir `internal/store/store_test.go` et `internal/analyze/analyze_test.go`.
+- **`CachedImpact` invalide sur les options, pas seulement le rootID** — la clé sha256 inclut `maxDepth + includeTests + expandInterfaces`. Changer une option = cache miss garanti, pas de résultat périmé.
 - **Rename git : deux formats possibles** — le format `rename from/to` (similarity ≥ 50%) est géré. Le format "delete + create" (similarity < 50%) produit deux entrées séparées dans le diff et est traité comme une suppression + nouveau fichier — comportement correct mais on perd la traçabilité sémantique du rename.
 
 ---
@@ -237,7 +238,7 @@ git diff main | /path/to/bin/blast diff --recommend-tests
 
 1. Lis ce fichier **en entier**.
 2. Vérifie que `git-archaeologist` est installé et fonctionnel à côté — Blast en dépend.
-3. Demande à l'utilisateur : *"On reprend où ? Section 6 indique qu'il reste : watch mode, TypeScript, mode explain, cache des impact reports, tester sur Kubernetes. Tu veux attaquer lequel ?"*
+3. Demande à l'utilisateur : *"On reprend où ? Section 6 indique qu'il reste : watch mode, TypeScript, cyclomatic complexity, tester sur Kubernetes. Tu veux attaquer lequel ?"*
 4. Si l'utilisateur dit *"continue"* sans préciser, propose le premier item non fait de la section 6.
 5. Avant d'écrire du code, `view` les fichiers concernés.
 6. Travaille. Mets à jour ce CLAUDE.md à la fin si tu as appris quelque chose.
