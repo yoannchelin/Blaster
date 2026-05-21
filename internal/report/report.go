@@ -51,6 +51,7 @@ type ImpactedHighlight struct {
 	Depth     int     `json:"depth"`
 	RiskScore float64 `json:"risk_score"`
 	Reason    string  `json:"reason"`
+	Explain   string  `json:"explain,omitempty"` // human sentence explaining why this is risky
 }
 
 // Synthesize builds a Verdict from an impact set + the store (for risk lookups).
@@ -89,12 +90,16 @@ func Synthesize(
 	// Attach risk scores. If a symbol has no metric row (e.g. metrics not
 	// computed yet), treat its score as 0 — the depth still ranks it.
 	highlights := make([]ImpactedHighlight, 0, len(impacted))
+	// Keep metrics keyed by qualified name for the explain pass after sorting.
+	metricsByQual := map[string]*store.Metrics{}
 	var maxRisk float64
 	for _, imp := range impacted {
 		v.DepthHistogram[imp.Depth]++
 		score := 0.0
-		if m, _ := s.GetMetric(imp.SymbolID); m != nil {
+		m, _ := s.GetMetric(imp.SymbolID)
+		if m != nil {
 			score = m.RiskScore
+			metricsByQual[imp.Qualified] = m
 		}
 		if score > maxRisk {
 			maxRisk = score
@@ -117,12 +122,84 @@ func Synthesize(
 	} else {
 		v.TopRisks = highlights
 	}
+	// Populate Explain only for the top risks — no extra DB queries needed.
+	for i := range v.TopRisks {
+		v.TopRisks[i].Explain = explainHighlight(v.TopRisks[i], metricsByQual[v.TopRisks[i].Qualified])
+	}
 
 	// Severity bucket.
 	v.Severity = classify(len(impacted), maxRisk, v.InterfaceFanout)
 	v.Headline = headline(v.Severity, len(impacted), maxRisk, v.InterfaceFanout)
 	v.Reasons = reasons(len(impacted), maxRisk, v.InterfaceFanout, v.DepthHistogram)
 	return v, nil
+}
+
+// explainHighlight generates a human sentence describing why a symbol appears
+// in the top risks. It combines depth, metrics, and a role inferred from the
+// symbol name so the LLM (and the human reading the CLI) don't have to decode
+// the raw numbers themselves.
+func explainHighlight(h ImpactedHighlight, m *store.Metrics) string {
+	var parts []string
+
+	// Role from name pattern (highest signal, goes first).
+	if role := inferRole(h.Qualified, h.Kind); role != "" {
+		parts = append(parts, role)
+	}
+
+	// Proximity to the change.
+	if h.Depth == 1 {
+		parts = append(parts, "direct caller")
+	} else {
+		parts = append(parts, fmt.Sprintf("reached in %d hops", h.Depth))
+	}
+
+	// Metrics-derived context (only when meaningful).
+	if m != nil {
+		if m.IsInterface {
+			parts = append(parts, "interface — all implementers must be updated")
+		}
+		if m.TransitiveIn > 20 {
+			parts = append(parts, fmt.Sprintf("%d symbols depend on it transitively", m.TransitiveIn))
+		} else if m.FanIn > 3 {
+			parts = append(parts, fmt.Sprintf("%d callers", m.FanIn))
+		}
+		if m.IsExported && !m.IsInterface {
+			parts = append(parts, "exported — public API surface")
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	// Capitalise first letter.
+	s := strings.Join(parts, "; ")
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// inferRole classifies a symbol into a human-readable role based on its name
+// and kind. Returns "" when no strong signal is found.
+func inferRole(qualified, kind string) string {
+	name := qualified
+	if i := strings.LastIndexByte(qualified, '.'); i >= 0 {
+		name = qualified[i+1:]
+	}
+	switch {
+	case strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Benchmark") || strings.HasPrefix(name, "Fuzz"):
+		return "test entry point"
+	case strings.HasPrefix(name, "Handle") || strings.HasSuffix(name, "Handler"):
+		return "HTTP handler"
+	case name == "main":
+		return "program entry point"
+	case (strings.HasPrefix(name, "New") || strings.HasPrefix(name, "Make")) && kind == "func":
+		return "constructor"
+	case kind == "interface":
+		return "interface"
+	case strings.HasSuffix(name, "Middleware"):
+		return "middleware"
+	case strings.HasSuffix(name, "Watcher") || strings.HasSuffix(name, "Worker") || strings.HasSuffix(name, "Runner"):
+		return "background worker"
+	}
+	return ""
 }
 
 func sortHighlights(s []ImpactedHighlight) {
@@ -211,7 +288,10 @@ func FormatVerdict(v *Verdict) string {
 		for i, h := range v.TopRisks {
 			fmt.Fprintf(&b, "  %d. [risk %5.1f, depth %d] %s\n", i+1, h.RiskScore, h.Depth, h.Qualified)
 			if h.Path != "" {
-				fmt.Fprintf(&b, "     %s:%d  (%s)\n", h.Path, h.Line, h.Reason)
+				fmt.Fprintf(&b, "     %s:%d\n", h.Path, h.Line)
+			}
+			if h.Explain != "" {
+				fmt.Fprintf(&b, "     → %s\n", h.Explain)
 			}
 		}
 	}
