@@ -128,7 +128,7 @@ Tous les tools retournent un **Verdict** structuré avec : severity (`low|medium
 
 2. ~~**Dogfooding sur Git Archaeologist + Hugo**~~ ✅ Fait.
 
-3. **Tests d'intégration sur Terraform / Kubernetes** — Hugo est validé. Kubernetes (~10k tests) permettrait de mesurer `blast tests` à l'échelle annoncée dans les pièges (potentiellement ~1 min).
+3. ~~**Tests d'intégration sur Terraform / Kubernetes**~~ ✅ Fait sur **etcd** (18 621 symboles, 21 706 call edges, 1 878 test functions). Kubernetes échoue à l'indexation (go.mod replace directives vers `./staging/src/k8s.io/` — modules internes non résolus par `packages.Load`). Résultats etcd : `blast metrics` **1.0s**, `blast tests` **1.3s → 44 915 mappings**, `blast impact` **15ms** cold. Scaling linéaire confirmé — etcd plus rapide que Hugo car moins de mappings par test.
 
 4. ~~**Gestion des renames dans le diff parser**~~ ✅ Fait. `rename from`/`rename to` détectés ; `AnalyzeFiles` run l'impact sur les symboles de l'ancien path, `FileImpact` expose `OldPath`+`IsRename`.
 
