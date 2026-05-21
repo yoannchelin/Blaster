@@ -4,10 +4,12 @@
 
 **Blast Radius** is a companion to [Git Archaeologist](../git-archaeologist). Archaeologist *understands* a repo; Blast Radius tells you the *consequences* of changing any part of it. It reads the SQLite index that Archaeologist produces and adds its own analyses on top:
 
-- **Impact analysis** — given any symbol, walk the call graph backwards to find everything that could break.
+- **Impact analysis** — walk the call graph backwards to find everything that could break.
 - **Diff analysis** — paste a `git diff` and get the pre-PR review a senior would give.
-- **Risk scoring** — 0–100 score per symbol combining fan-in, exportedness, churn, file size, interface fanout.
-- **Test recommendation** — given a change, surface the tests that exercise the impacted paths.
+- **Risk scoring** — 0–100 score per symbol combining fan-in, exportedness, churn, PageRank, interface fan-out, and file size.
+- **Test recommendation** — given a change, surface the tests that exercise the impacted paths, closest first.
+- **Cyclomatic complexity** — flags high-complexity functions touched by a diff.
+- **Watch mode** — recomputes metrics automatically whenever Archaeologist re-indexes.
 
 Like Archaeologist, it runs **100% locally**. No LLM call, no API, no cloud. Pure graph traversal and SQL.
 
@@ -76,7 +78,24 @@ impact(S, depth):
     return visited
 ```
 
-Risk score is a weighted sum of five normalised factors (`transitive_in`, `is_exported`, `is_interface`, `churn`, `loc_in_file`). Tuned so a private helper scores ~10 and a core utility scores ~85.
+Results are cached in `blast_impact_cache` (keyed by `sha256(rootID:maxDepth:options)`). Cache hits drop from ~400ms to ~6ms on Hugo-scale repos. Caches are invalidated whenever Archaeologist re-indexes.
+
+Risk score is a weighted sum of six normalised factors: `transitive_in` (0.25), `churn` (0.20), `is_exported` (0.15), `is_interface` (0.15), `loc_in_file` (0.15), `pagerank` (0.10). Tuned so a private helper scores ~10 and a core interface scores ~85.
+
+---
+
+## Performance
+
+Validated on Hugo (12k symbols) and etcd (18k symbols, 21k call edges):
+
+| Operation | Hugo | etcd |
+|---|---|---|
+| `blast metrics` | 0.66s / 9k syms | 1.0s / 8.7k syms |
+| `blast tests` | 3.4s → 130k mappings | 1.3s → 44k mappings |
+| `blast impact` (cold) | ~466ms | ~15ms |
+| `blast impact` (cached) | ~6ms | ~6ms |
+
+Scaling is linear. `blast impact` on a cached result resolves in single-digit milliseconds regardless of repo size.
 
 ---
 
@@ -84,12 +103,12 @@ Risk score is a weighted sum of five normalised factors (`transitive_in`, `is_ex
 
 ```bash
 # Prerequisites: Git Archaeologist installed and a repo already indexed.
-#   archaeo index --repo /path/to/repo
+#   archaeo index --repo /path/to/repo --with-tests
 
-git clone https://github.com/yourname/blast-radius
-cd blast-radius
+git clone https://github.com/yoannchelin/Blaster
+cd Blaster
 go mod tidy
-make install   # installs `blast` and `blast-mcp`
+make install   # installs `blast` and `blast-mcp` into ./bin/
 ```
 
 ---
@@ -98,15 +117,16 @@ make install   # installs `blast` and `blast-mcp`
 
 ### 1. Prep a repo
 
-After every `archaeo index`, run these two once to populate Blast's tables:
+Index with Archaeologist first, then run these two once to populate Blast's tables:
 
 ```bash
-cd /path/to/repo
-blast metrics      # compute per-symbol risk scores (~10s on 50k symbols)
-blast tests        # build the test→prod symbol map
+archaeo index --repo /path/to/repo --no-embed --with-tests
+
+blast metrics --repo /path/to/repo   # ~1s on 10k symbols
+blast tests   --repo /path/to/repo   # build test→prod map
 ```
 
-You only need to re-run these when Archaeologist re-indexes — Blast detects stale data via `meta.last_index` and auto-invalidates its caches.
+You only need to re-run these when Archaeologist re-indexes — or use `blast watch` to do it automatically.
 
 ### 2. Ad-hoc queries
 
@@ -122,9 +142,22 @@ git diff main | blast diff --recommend-tests
 
 # Or pass a patch file
 blast diff /tmp/proposed.patch
+
+# Show current state of blast tables
+blast info
 ```
 
-### 3. Plug into Claude Desktop (or any MCP client)
+### 3. Watch mode
+
+Keep metrics fresh automatically as Archaeologist re-indexes:
+
+```bash
+blast watch --repo /path/to/repo --with-tests
+```
+
+Polls `meta.last_index` every 5 seconds (configurable with `--interval`). The MCP server (`blast-mcp`) runs this automatically in the background.
+
+### 4. Plug into Claude Desktop (or any MCP client)
 
 ```json
 {
@@ -151,7 +184,36 @@ Then ask in natural language: *"use blast-radius to tell me what changes if I re
 | `risk_score` | Pre-computed risk row for a symbol |
 | `tests_to_run` | Which tests should I rerun for these changes |
 
-Each tool returns a structured **Verdict**: a severity bucket (`low|medium|high|critical`), a one-line headline, a list of reasons, top 8 impacted symbols ranked by risk, and recommended tests. The LLM consumes this and presents it; the heuristics are already baked in so the LLM doesn't have to invent them.
+Each tool returns a structured **Verdict**: a severity bucket (`low|medium|high|critical`), a one-line headline, a list of reasons, top 8 impacted symbols ranked by risk with an explanation of why each is risky, and recommended tests. The LLM presents it; the heuristics are already baked in.
+
+---
+
+## Reading the output
+
+```
+Severity: MEDIUM
+Moderate impact: 15 symbols affected.
+
+  • 2 direct callers (depth=1) will see this change immediately.
+  • 1 interface touched — all implementers must be updated.
+
+Top impacted symbols:
+  1. [risk  40.8, depth 1] go.etcd.io/etcd/server/v3/storage/backend/testing.NewTmpBackendFromCfg
+     server/storage/backend/testing/betesting.go:29
+     → Constructor; direct caller; 187 symbols depend on it transitively; exported — public API surface
+  ...
+
+Recommended tests to run (closest first):
+  1. TestBackendSnapshot  (depth 1)
+  2. TestLessorRenewExtendPileup  (depth 1)
+  ...and 185 more.
+```
+
+When running `blast diff`, high-complexity functions touched by the diff are flagged:
+
+```
+  • payment.ChargeCustomer  [func, hunk 42-89, complexity=14 ⚠]
+```
 
 ---
 
@@ -160,19 +222,12 @@ Each tool returns a structured **Verdict**: a severity bucket (`low|medium|high|
 - **Read-only on Archaeologist's tables.** We never modify upstream. If you want to fix something, re-run `archaeo index`.
 - **All `blast_*` tables.** Namespace-scoped so multiple companion agents (Bug Hunter, Test Sentinel…) can share the same DB without collisions.
 - **Cache invalidation by upstream timestamp.** Blast stores `seen_index` and compares to Archaeologist's `meta.last_index` on open. If they differ, all `blast_metrics`, `blast_test_map`, `blast_impact_cache` rows are wiped.
-- **Brute-force BFS, capped at depth 6.** Beyond 6 hops, the impact set tends toward "everything reaches main()" — meaningless. The cap is configurable per call.
-- **Interface fan-out is opt-in (default on).** Changing an interface ripples to every implementer; changing a struct method does not. We model this explicitly with the `implements` edges.
+- **Reverse BFS, capped at depth 6.** Beyond 6 hops, the impact set tends toward "everything reaches main()" — meaningless. The cap is configurable per call.
+- **Interface fan-out is on by default.** Changing an interface ripples to every implementer; we model this explicitly with the `implements` edges.
+- **PageRank from Archaeologist.** We read the `symbols.pagerank` column written by Archaeologist — no recomputation. Symbols with high PageRank (heavily referenced across the graph) score higher.
+- **Cyclomatic complexity via go/ast.** Parsed on demand for Go files touched by a diff. Non-Go files gracefully fall back to 1.
+- **TypeScript support.** All SQL queries and the BFS are language-agnostic. Test discovery uses Archaeologist's `is_test` file flag rather than Go-specific naming patterns.
 - **Severity heuristic is opinionated.** Tweak `report.classify()` to match your team's risk appetite.
-
----
-
-## Roadmap
-
-- [ ] Watch mode — invalidate caches on `.archaeo/index.db` mtime change
-- [ ] Diff impact: handle renames (currently treated as delete+create)
-- [ ] PageRank-based centrality factor in risk score
-- [ ] Cyclomatic complexity factor in risk score (parse AST locally for touched funcs)
-- [ ] TypeScript support (depends on Archaeologist's TS call graph)
 
 ---
 
@@ -180,14 +235,15 @@ Each tool returns a structured **Verdict**: a severity bucket (`low|medium|high|
 
 ```
 cmd/
-  blast/            CLI: blast info|metrics|tests|impact|file|diff
-  blast-mcp/        MCP server (stdio transport)
+  blast/            CLI: blast info|metrics|tests|impact|file|diff|watch
+  blast-mcp/        MCP server (stdio transport, auto watch in background)
 internal/
   store/            DB layer (read archaeo, write blast_*)
-  analyze/          Reverse BFS impact algorithm
-  diff/             Unified diff parser + diff → impact
-  risk/             Per-symbol risk score computation
+  analyze/          Reverse BFS impact algorithm + impact cache
+  diff/             Unified diff parser + diff → impact (handles renames)
+  risk/             Per-symbol risk score computation (6 factors)
   tests/            test → prod symbol map builder
   report/           Severity classification + human-friendly verdict
+  complexity/       Cyclomatic complexity via go/ast
   mcpserver/        The 5 MCP tools
 ```
