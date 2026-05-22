@@ -7,13 +7,13 @@
 //
 // Factors and weights:
 //
-//	transitive_in  (0.35) — how many transitive callers can reach this symbol.
-//	                        Saturates at 200: anything above is "core".
-//	is_exported    (0.15) — exported symbols are part of a public surface;
-//	                        breaking them ripples through users.
+//	fan_in         (0.10) — direct callers (linear saturation at 50). Immediate blast surface.
+//	transitive_in  (0.15) — transitive callers, sqrt-saturated at 200: anything above is "core".
+//	is_exported    (0.15) — exported symbols are part of a public surface.
 //	is_interface   (0.15) — interfaces affect every implementer.
 //	churn          (0.20) — recent edits → unstable area, higher risk to touch.
 //	loc_in_file    (0.15) — symbols in big files are usually load-bearing.
+//	pagerank       (0.10) — graph centrality from archaeologist; 0 if not computed.
 //
 // We compute factors once after each archaeologist re-index and persist
 // them in `blast_metrics`. The MCP server reads from there.
@@ -31,7 +31,8 @@ import (
 
 // Weights for the risk formula. Exposed so they can be tuned without a recompile.
 type Weights struct {
-	TransitiveIn float64
+	FanIn        float64 // direct callers (linear saturation at 50)
+	TransitiveIn float64 // transitive callers (sqrt saturation at 200)
 	Exported     float64
 	Interface    float64
 	Churn        float64
@@ -39,14 +40,14 @@ type Weights struct {
 	Pagerank     float64 // graph centrality from archaeologist; 0 if not computed
 }
 
-// DefaultWeights returns the tuned defaults.
-// The six weights must sum to 1.0. Pagerank takes 0.10 reallocated from
-// TransitiveIn (0.35→0.25) and LOC (0.15→0.15, unchanged) to keep the
-// formula balanced: transitive call count and graph centrality capture
-// related but distinct signals.
+// DefaultWeights returns the tuned defaults. All seven weights sum to 1.0.
+// FanIn captures the immediate blast surface (linear); TransitiveIn captures
+// deep reachability (sqrt-saturated). Together they give better discrimination
+// between a utility called from 5 places vs one called from 50+.
 func DefaultWeights() Weights {
 	return Weights{
-		TransitiveIn: 0.25,
+		FanIn:        0.10,
+		TransitiveIn: 0.15,
 		Exported:     0.15,
 		Interface:    0.15,
 		Churn:        0.20,
@@ -95,7 +96,8 @@ func Compute(ctx context.Context, s *store.Store, w Weights, progress func(done,
 		isIface := sym.Kind == "interface"
 
 		// Normalise factors to 0..1.
-		nTrans := saturate(float64(transIn), 200)
+		nFanIn := saturateLinear(float64(fanIn), 50)   // linear: direct callers saturate at 50
+		nTrans := saturate(float64(transIn), 200)       // sqrt: deep reachability
 		nExported := 0.0
 		if sym.Exported {
 			nExported = 1.0
@@ -116,7 +118,8 @@ func Compute(ctx context.Context, s *store.Store, w Weights, progress func(done,
 		nPagerank := sym.Pagerank
 
 		score := 100 * (
-			w.TransitiveIn*nTrans +
+			w.FanIn*nFanIn +
+				w.TransitiveIn*nTrans +
 				w.Exported*nExported +
 				w.Interface*nIface +
 				w.Churn*nChurn +
@@ -220,9 +223,8 @@ func fetchFileLOC(s *store.Store) (map[int64]int, int, error) {
 	return out, maxV, rows.Err()
 }
 
-// saturate normalises x against ceiling such that x>=ceiling maps to 1.0.
-// We use a soft curve (sqrt) so the difference between 50 and 100 callers
-// is more visible than between 150 and 200.
+// saturate normalises x against ceiling with a sqrt curve: differences in the
+// middle of the range are more visible than at the extremes.
 func saturate(x, ceiling float64) float64 {
 	if x <= 0 {
 		return 0
@@ -231,4 +233,17 @@ func saturate(x, ceiling float64) float64 {
 		return 1
 	}
 	return math.Sqrt(x / ceiling)
+}
+
+// saturateLinear normalises x against ceiling linearly: each additional caller
+// up to the ceiling contributes equally. Better for small counts (fan-in)
+// where the difference between 5 and 10 direct callers is meaningful.
+func saturateLinear(x, ceiling float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	if x >= ceiling {
+		return 1
+	}
+	return x / ceiling
 }
